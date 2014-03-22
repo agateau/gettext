@@ -145,6 +145,9 @@ static int msgs_fuzzy;
 /* If not zero print statistics about translation at the end.  */
 static int do_statistics;
 
+/* If true do not compile Java source code.  */
+static bool sources_only = false;
+
 /* Long options.  */
 static const struct option long_options[] =
 {
@@ -168,6 +171,7 @@ static const struct option long_options[] =
   { "properties-input", no_argument, NULL, 'P' },
   { "qt", no_argument, NULL, CHAR_MAX + 9 },
   { "resource", required_argument, NULL, 'r' },
+  { "sources-only", no_argument, NULL, CHAR_MAX + 14 },
   { "statistics", no_argument, &do_statistics, 1 },
   { "strict", no_argument, NULL, 'S' },
   { "stringtable-input", no_argument, NULL, CHAR_MAX + 8 },
@@ -352,6 +356,9 @@ main (int argc, char *argv[])
 
           byteswap = endianness ^ ENDIANNESS;
         }
+        break;
+      case CHAR_MAX + 14: /* --sources-only */
+        sources_only = true;
         break;
       default:
         usage (EXIT_FAILURE);
@@ -556,7 +563,8 @@ There is NO WARRANTY, to the extent permitted by law.\n\
         {
           if (msgdomain_write_java (domain->mlp, canon_encoding,
                                     java_resource_name, java_locale_name,
-                                    java_class_directory, assume_java2))
+                                    java_class_directory, assume_java2,
+                                    sources_only))
             exit_status = EXIT_FAILURE;
         }
       else if (csharp_mode)
@@ -771,6 +779,8 @@ Output details:\n"));
                                 (big or little, default depends on platform)\n"));
       printf (_("\
       --no-hash               binary file will not include the hash table\n"));
+      printf (_("\
+      --sources-only          produce .java files, not compiled .class files\n"));
       printf ("\n");
       printf (_("\
 Informative output:\n"));

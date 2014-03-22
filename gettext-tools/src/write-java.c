@@ -1044,7 +1044,8 @@ int
 msgdomain_write_java (message_list_ty *mlp, const char *canon_encoding,
                       const char *resource_name, const char *locale_name,
                       const char *directory,
-                      bool assume_java2)
+                      bool assume_java2,
+                      bool sources_only)
 {
   int retval;
   struct temp_dir *tmpdir;
@@ -1054,6 +1055,9 @@ msgdomain_write_java (message_list_ty *mlp, const char *canon_encoding,
   char *java_file_name;
   FILE *java_file;
   const char *java_sources[1];
+  char *source_dir_name;
+  FILE* (*source_fopen)(const char *, const char *mode);
+  int (*source_fwriteerror)(FILE *);
 
   /* If no entry for this resource/domain, don't even create the file.  */
   if (mlp->nitems == 0)
@@ -1065,9 +1069,21 @@ msgdomain_write_java (message_list_ty *mlp, const char *canon_encoding,
   iconv_message_list (mlp, canon_encoding, po_charset_utf8, NULL);
 
   /* Create a temporary directory where we can put the Java file.  */
-  tmpdir = create_temp_dir ("msg", NULL, false);
-  if (tmpdir == NULL)
-    goto quit1;
+  if (sources_only)
+    {
+      source_dir_name = xstrdup (directory);
+      tmpdir = NULL;
+    }
+  else
+    {
+      tmpdir = create_temp_dir ("msg", NULL, false);
+      if (tmpdir == NULL)
+        goto quit1;
+      source_dir_name = xstrdup (tmpdir->dir_name);
+    }
+
+  source_fopen = sources_only ? fopen : fopen_temp;
+  source_fwriteerror = sources_only ? fwriteerror : fwriteerror_temp;
 
   /* Assign a default value to the resource name.  */
   if (resource_name == NULL)
@@ -1092,7 +1108,7 @@ msgdomain_write_java (message_list_ty *mlp, const char *canon_encoding,
     const char *last_dir;
     int i;
 
-    last_dir = tmpdir->dir_name;
+    last_dir = source_dir_name;
     p = resource_name;
     for (i = 0; i < ndots; i++)
       {
@@ -1125,49 +1141,56 @@ msgdomain_write_java (message_list_ty *mlp, const char *canon_encoding,
 
     for (i = 0; i < ndots; i++)
       {
-        register_temp_subdir (tmpdir, subdirs[i]);
+        if (!sources_only)
+          register_temp_subdir (tmpdir, subdirs[i]);
         if (mkdir (subdirs[i], S_IRUSR | S_IWUSR | S_IXUSR) < 0)
           {
             error (0, errno, _("failed to create \"%s\""), subdirs[i]);
-            unregister_temp_subdir (tmpdir, subdirs[i]);
+            if (!sources_only)
+              unregister_temp_subdir (tmpdir, subdirs[i]);
             goto quit3;
           }
       }
   }
 
+  if (!sources_only)
+      register_temp_file (tmpdir, java_file_name);
   /* Create the Java file.  */
-  register_temp_file (tmpdir, java_file_name);
-  java_file = fopen_temp (java_file_name, "w");
+  java_file = source_fopen (java_file_name, "w");
   if (java_file == NULL)
     {
       error (0, errno, _("failed to create \"%s\""), java_file_name);
-      unregister_temp_file (tmpdir, java_file_name);
+      if (!sources_only)
+        unregister_temp_file (tmpdir, java_file_name);
       goto quit3;
     }
 
   write_java_code (java_file, class_name, mlp, assume_java2);
 
-  if (fwriteerror_temp (java_file))
+  if (source_fwriteerror (java_file))
     {
       error (0, errno, _("error while writing \"%s\" file"), java_file_name);
       goto quit3;
     }
 
-  /* Compile the Java file to a .class file.
-     directory must be non-NULL, because when the -d option is omitted, the
-     Java compilers create the class files in the source file's directory -
-     which is in a temporary directory in our case.  */
-  java_sources[0] = java_file_name;
-  if (compile_java_class (java_sources, 1, NULL, 0, "1.3", "1.1", directory,
-                          true, false, true, verbose > 0))
+  if (!sources_only)
     {
-      if (!verbose)
-        error (0, 0, _("\
-compilation of Java class failed, please try --verbose or set $JAVAC"));
-      else
-        error (0, 0, _("\
-compilation of Java class failed, please try to set $JAVAC"));
-      goto quit3;
+      /* Compile the Java file to a .class file.
+         directory must be non-NULL, because when the -d option is omitted, the
+         Java compilers create the class files in the source file's directory -
+         which is in a temporary directory in our case.  */
+      java_sources[0] = java_file_name;
+      if (compile_java_class (java_sources, 1, NULL, 0, "1.3", "1.1", directory,
+                              true, false, true, verbose > 0))
+        {
+          if (!verbose)
+            error (0, 0, _("\
+    compilation of Java class failed, please try --verbose or set $JAVAC"));
+          else
+            error (0, 0, _("\
+    compilation of Java class failed, please try to set $JAVAC"));
+          goto quit3;
+        }
     }
 
   retval = 0;
@@ -1182,7 +1205,9 @@ compilation of Java class failed, please try to set $JAVAC"));
   freea (subdirs);
   free (class_name);
  quit2:
-  cleanup_temp_dir (tmpdir);
+  if (!sources_only)
+    cleanup_temp_dir (tmpdir);
+  free (source_dir_name);
  quit1:
   return retval;
 }
